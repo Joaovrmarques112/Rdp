@@ -56,38 +56,41 @@ jobs:
               exit 1
           }
 
-      - name: Install Tailscale
+            - name: Install Tailscale
+        shell: powershell
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP	ailscale.msi"
-          
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          $installerPath = Join-Path $env:TEMP "tailscale.msi"
 
-      - name: Establish Tailscale Connection
-        run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
-          & "$env:ProgramFiles\Tailscale	ailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
-          # Wait for Tailscale to assign an IP
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale	ailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+          Write-Host "Downloading Tailscale installer..."
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+
+          if (-not (Test-Path $installerPath)) {
+              Write-Error "Tailscale installer was not downloaded."
               exit 1
           }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Verify RDP Accessibility
-        run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+
+          Write-Host "Installing Tailscale..."
+          $process = Start-Process msiexec.exe `
+              -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" `
+              -Wait `
+              -PassThru
+
+          if ($process.ExitCode -ne 0) {
+              Write-Error "Tailscale installation failed. Exit code: $($process.ExitCode)"
+              exit 1
+          }
+
+          Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+          $tailscaleExe = Join-Path ${env:ProgramFiles} "Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $tailscaleExe)) {
+              Write-Error "Tailscale executable was not found."
+              exit 1
+          }
+
+          Write-Host "Tailscale installed successfully!"
           
           # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
